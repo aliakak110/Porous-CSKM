@@ -1,0 +1,638 @@
+#include<stdio.h>
+#include<conio.h>
+#include<cuda.h>
+#include<cuda_runtime.h>
+#include<stdlib.h>
+#include<device_launch_parameters.h>
+#include<time.h>
+#include<math.h>
+#include<fstream>
+#include<string>
+
+using namespace std;
+
+
+//************************define constant parameters****************************************************
+#define NX				256
+#define NY				128
+#define NZ				128
+
+#define tau			     1.0
+#define FX                  0.000001
+#define FY                  0.000
+#define FZ                  0.000
+
+#define R                  50.0
+
+#define V                  1.0
+#define cs2                0.25*V*V
+#define cs                 (sqrt(cs2))
+//.........................
+
+#define MLUPS(it,time)  (it+0.0)/time*NX*NY*NZ/1000000     
+//***********************define device(global) variable***************************************************
+int it;
+
+
+__device__ float  PHI[NX][NY][NZ],rof[NX][NY][NZ],wc[19],cx[19],cy[19],cz[19],uf_d[NX][NY][NZ],vf_d[NX][NY][NZ],wf_d[NX][NY][NZ];
+__device__ int  ex[19],ey[19],ez[19];
+
+//***********************define function******************************************************************
+//********************************************************************************************************
+
+//******************initialize******************************
+__global__ void initialize(float *fin_d, float *phi_d)
+
+{
+	float den_if,a;
+	int i  = threadIdx.x;			 //-- x direction index
+	int j  = blockIdx.y;    //-- y direction index
+	int k  = blockIdx.x;    //-- z direction index
+	int	id=k*(NX*NY)+ j*NX+i;//unique index gor each thread among all threads
+	
+	int d,idd;
+
+	 a = sqrt(2.0);
+
+	cx[1] =  1.0/a;  cy[1] =  1.0/a;    cz[1] = 0.0/a;
+	cx[2] =  1.0/a;  cy[2] = -1.0/a;    cz[2] = 0.0/a;
+	cx[3] = -1.0/a;  cy[3] =  1.0/a;    cz[3] = 0.0/a;
+	cx[4] = -1.0/a;  cy[4] = -1.0/a;    cz[4] = 0.0/a;
+
+	cx[5] =  1.0/a;  cy[5] =  0.0/a;    cz[5] =  1.0/a;
+	cx[6] =  1.0/a;  cy[6] =  0.0/a;    cz[6] = -1.0/a;
+	cx[7] = -1.0/a;  cy[7] =  0.0/a;    cz[7] = 1.0/a;
+	cx[8] = -1.0/a;  cy[8] =  0.0/a;    cz[8] = -1.0/a;
+
+	cx[9]  =  0.0/a;  cy[9]  =  1.0/a;      cz[9] = 1.0/a;
+	cx[10] =  0.0/a;  cy[10] = 1.0/a;      cz[10] = -1.0/a;
+	cx[11] =  0.0/a;  cy[11] =  -1.0/a;    cz[11] = 1.0/a;
+	cx[12] =  0.0/a;  cy[12] =  -1.0/a;    cz[12] =-1.0/a;
+
+	cx[13] =  1.0/a;  cy[13] =  0.0/a;    cz[13] = 0.0/a;
+	cx[14] = -1.0/a;  cy[14] =  0.0/a;    cz[14] = 0.0/a;
+	cx[15] =  0.0/a;  cy[15] =  1.0/a;    cz[15] = 0.0/a;
+	cx[16] =  0.0/a;  cy[16] = -1.0/a;    cz[16] = 0.0/a;
+	cx[17] =  0.0/a;  cy[17] =  0.0/a;    cz[17] = 1.0/a;
+	cx[18] =  0.0/a;  cy[18] =  0.0/a;    cz[18] = -1.0/a;
+
+	cx[0] =  0.0;  cy[0] =  0.0;    cz[0] = 0.0;
+
+  // ------ intervals for the neighbour nodes -------
+  
+	ex[1] =  1;  ey[1] =  1;    ez[1] = 0;
+	ex[2] =  1;  ey[2] = -1;    ez[2] = 0;
+	ex[3] = -1;  ey[3] =  1;    ez[3] = 0;
+	ex[4] = -1;  ey[4] = -1;    ez[4] = 0;
+
+	ex[5] =  1;  ey[5] =  0;    ez[5] =  1;
+	ex[6] =  1;  ey[6] =  0;    ez[6] = -1;
+	ex[7] = -1;  ey[7] =  0;    ez[7] = 1;
+	ex[8] = -1;  ey[8] =  0;    ez[8] = -1;
+
+	ex[9]  =  0;  ey[9]  =  1;      ez[9] = 1;
+	ex[10] =  0;  ey[10] = 1;      ez[10] = -1;
+	ex[11] =  0;  ey[11] =  -1;    ez[11] = 1;
+	ex[12] =  0;  ey[12] =  -1;    ez[12] =-1;
+
+	ex[13] =  1;  ey[13] =  0;    ez[13] = 0;
+	ex[14] = -1;  ey[14] =  0;    ez[14] = 0;
+	ex[15] =  0;  ey[15] =  1;    ez[15] = 0;
+	ex[16] =  0;  ey[16] = -1;    ez[16] = 0;
+	ex[17] =  0;  ey[17] =  0;    ez[17] = 1;
+	ex[18] =  0;  ey[18] =  0;    ez[18] = -1;
+
+	ex[0] =  0;  ey[0] =  0;  ez[0] =  0;
+	wc[0]=0.0;
+	wc[1]=wc[2]=wc[3]=wc[4]=wc[5]=wc[6]=wc[7]=wc[8]=wc[9]=wc[10]=wc[11]=wc[12]=1.0/24.0;
+	wc[13]=wc[14] = wc[15] = wc[16] = wc[17] = wc[18] = 2.0/24.0;
+    
+	//**** equilibrium distribution functions **
+	PHI[i][j][k]=phi_d[id];
+	
+	if(PHI[i][j][k]>0.5){
+		den_if=0.0;
+	}else{
+		den_if=1.0;
+	}
+	for(d=1; d<=18; ++d){
+		idd = (d-1)*(NX*NY*NZ) + id;
+		fin_d[idd] = den_if*wc[d];
+	}	
+}
+//******************* collision function*********************
+__global__ void calcprop(float *fin_d)
+{
+// bgk
+	int d,idd,VOL;
+	
+	int i  = threadIdx.x;			 //-- x direction index
+	int j  = blockIdx.y;    //-- y direction index
+	int k  = blockIdx.x;    //-- z direction index
+	int	id=k*(NX*NY)+ j*NX+i;//unique index gor each thread among all threads
+	VOL=NX*NY*NZ;
+	rof[i][j][k]=0.0;
+	uf_d[i][j][k]=0.0;
+	vf_d[i][j][k]=0.0;
+	wf_d[i][j][k]=0.0;
+	if(PHI[i][j][k]<0.5){
+		//for(d=1; d<=18; ++d){
+			//	idd = (d-1)*(NX*NY*NZ)+ id;
+	
+		rof[i][j][k]=fin_d[id]+fin_d[VOL+id]+fin_d[2*VOL+id]+fin_d[3*VOL+id]+fin_d[4*VOL+id]+fin_d[5*VOL+id]+fin_d[6*VOL+id]+fin_d[7*VOL+id]+fin_d[8*VOL+id]
+		+fin_d[9*VOL+id]+fin_d[10*VOL+id]+fin_d[11*VOL+id]+fin_d[12*VOL+id]+fin_d[13*VOL+id]+fin_d[14*VOL+id]+fin_d[15*VOL+id]+fin_d[16*VOL+id]+fin_d[17*VOL+id];
+		
+		uf_d[i][j][k]=fin_d[0*VOL+id]+fin_d[1*VOL+id]-fin_d[2*VOL+id]-fin_d[3*VOL+id]+fin_d[4*VOL+id]+fin_d[5*VOL+id]-fin_d[6*VOL+id]-fin_d[7*VOL+id]+fin_d[12*VOL+id]-fin_d[13*VOL+id];
+		vf_d[i][j][k]=fin_d[0*VOL+id]-fin_d[1*VOL+id]+fin_d[2*VOL+id]-fin_d[3*VOL+id]+fin_d[8*VOL+id]+fin_d[9*VOL+id]-fin_d[10*VOL+id]-fin_d[11*VOL+id]+fin_d[14*VOL+id]-fin_d[15*VOL+id];
+		wf_d[i][j][k]=fin_d[4*VOL+id]-fin_d[5*VOL+id]+fin_d[6*VOL+id]-fin_d[7*VOL+id]+fin_d[8*VOL+id]-fin_d[9*VOL+id]+fin_d[10*VOL+id]-fin_d[11*VOL+id]+fin_d[16*VOL+id]-fin_d[17*VOL+id];
+		
+		//}
+	}
+}
+
+//******************* collision function*********************
+__global__ void collision(float *fin_d, float *fout_d)
+{
+// bgk
+	int d,idd,VOL;
+
+	int i  = threadIdx.x;			 //-- x direction index
+	int j  = blockIdx.y;    //-- y direction index
+	int k  = blockIdx.x;    //-- z direction index
+	int	id=k*(NX*NY)+ j*NX+i;//unique index gor each thread among all threads
+
+	float feq_d[19],rf,u,v,w;
+	float velf2,velf;
+	VOL=NX*NY*NZ;
+		if(PHI[i][j][k]<0.5){
+			rf=fin_d[id]+fin_d[VOL+id]+fin_d[2*VOL+id]+fin_d[3*VOL+id]+fin_d[4*VOL+id]+fin_d[5*VOL+id]+fin_d[6*VOL+id]+fin_d[7*VOL+id]+fin_d[8*VOL+id]
+		+fin_d[9*VOL+id]+fin_d[10*VOL+id]+fin_d[11*VOL+id]+fin_d[12*VOL+id]+fin_d[13*VOL+id]+fin_d[14*VOL+id]+fin_d[15*VOL+id]+fin_d[16*VOL+id]+fin_d[17*VOL+id];
+		
+		u=fin_d[0*VOL+id]+fin_d[1*VOL+id]-fin_d[2*VOL+id]-fin_d[3*VOL+id]+fin_d[4*VOL+id]+fin_d[5*VOL+id]-fin_d[6*VOL+id]-fin_d[7*VOL+id]+fin_d[12*VOL+id]-fin_d[13*VOL+id];
+		v=fin_d[0*VOL+id]-fin_d[1*VOL+id]+fin_d[2*VOL+id]-fin_d[3*VOL+id]+fin_d[8*VOL+id]+fin_d[9*VOL+id]-fin_d[10*VOL+id]-fin_d[11*VOL+id]+fin_d[14*VOL+id]-fin_d[15*VOL+id];
+		w=fin_d[4*VOL+id]-fin_d[5*VOL+id]+fin_d[6*VOL+id]-fin_d[7*VOL+id]+fin_d[8*VOL+id]-fin_d[9*VOL+id]+fin_d[10*VOL+id]-fin_d[11*VOL+id]+fin_d[16*VOL+id]-fin_d[17*VOL+id];
+		
+				
+		//rf = rof[i][j][k];
+		if(rf!=0.0){
+		u = (u/sqrt(2.0))/rf; 
+		v = (v/sqrt(2.0))/rf; 
+		w = (w/sqrt(2.0))/rf; 
+		}else {	
+			u=0.0;
+			v=0.0;
+			w=0.0;
+		}
+
+			
+		velf2 = u*u + v*v + w*w;
+		//********* equilibrium distribution functions **********************************
+		for(d=1; d<=18; ++d){
+			velf=u*cx[d]+v*cy[d]+w*cz[d];
+			feq_d[d]=rf*wc[d]*((1.0 - velf2)/((1.0 + velf2 - 2.0*velf)*(1.0 + velf2 - 2.0*velf)));
+					
+			idd = (d-1)*(NX*NY*NZ) + id;
+			fout_d[idd] =fin_d[idd] -(fin_d[idd] -feq_d[d] )/tau+cx[d]*FX*wc[d]/(cs2);//+(1.0-0.5/tau)*(feq_p[d]-feq_n[d]);//+ex[d]*FX*wc[d]/(cs2)+cy[d]*FY*wc[d]/(cs2)+cz[d]*FZ*wc[d]/(cs2);
+		}
+		
+	}
+}
+
+//******* straming function*****************************************
+__global__ void streaming(float *fin_d, float *fout_d)
+{
+	int rev[19];
+	rev[0]=0;	rev[9]=12;
+	rev[1]=4;	rev[10]=11;
+	rev[2]=3;	rev[11]=10;
+	rev[3]=2;	rev[12]=9;
+	rev[4]=1;	rev[13]=14;
+	rev[5]=8;	rev[14]=13;
+	rev[6]=7;	rev[15]=16;
+	rev[7]=6;	rev[16]=15;
+	rev[8]=5;	rev[17]=18;
+				rev[18]=17;
+	
+	int i  = threadIdx.x;			 //-- x direction index
+	int j  = blockIdx.y;    //-- y direction index
+	int k  = blockIdx.x;    //-- z direction index
+	
+	int d,id,idd,in,jn,kn;
+	if(PHI[i][j][k]<0.5){
+		for(d=1; d<=18; ++d){		
+				in= i + ex[d]; 
+				jn= j + ey[d];
+				kn= k + ez[d];
+			
+				if( in == NX) in = 0;	
+				if( in ==-1)  in = NX-1;
+				if( jn == NY) jn = 0;		
+				if( jn ==-1)  jn = NY-1;
+				if( kn == NZ) kn = 0;	
+				if( kn ==-1)  kn = NZ-1;
+				id=(d-1)*(NX*NY*NZ) + k*(NX*NY)+ j*NX+i; 
+	
+				if(PHI[in][jn][kn]>0.5){
+					idd = (rev[d]-1)*(NX*NY*NZ) + k*(NX*NY)+ j*NX+i;
+					fin_d[idd]=fout_d[id];
+				}else{ 
+					idd = (d-1)*(NX*NY*NZ) + kn*(NX*NY)+ jn*NX+in;
+					fin_d[idd]=fout_d[id];
+			}
+		}
+	}
+}
+
+//********* save result function*************************************************
+void results(float *denf_h,float *u_h,float *v_h,float *w_h,float *phi_h)
+{
+	int j,i,k,id;
+	float Kn, visc,H,yy,uanal,l;
+	FILE *out;
+	//char s[10];
+	//sprintf(s, "%d", it);
+	//out=fopen(s,"w");
+	out=fopen("field.plt","w");
+	fprintf(out,"variables=X, Y, Z, rhof, U, V, W, phi\n");
+	fprintf(out,"zone t=\"zone 1\",i=%d,j=%d,k=%d\n",NX ,NY ,NZ );
+	for(k = 0; k<NZ; k++){
+		for(j = 0; j<NY ; j++){
+			for(i=0; i<NX; i++){
+				id=k*(NX*NY)+j*NX+i;
+				fprintf(out,"%d\t %d\t %d\t %f\t %f\t %f\t %f\t %f\n",i,j,k,denf_h[id],u_h[id],v_h[id],w_h[id],phi_h[id]);
+			}
+		}
+	}
+	fclose(out);
+
+	out=fopen("U.plt","w");
+    fprintf(out,"zone\n");
+  
+  // ---------------- calculate the field variables ------------------
+  i=NX/2;
+  k=NZ/2;
+  H=(NZ-2.0);
+  Kn = sqrt(8.0/3.0/3.1415)*(tau-0.5)/H;
+  visc=( tau - 0.5)/3.0 ;
+  for(j=1;j<NY-1;++j){
+	 id=k*(NX*NY)+j*NX+i;
+	 //vel = sqrt(u_h[id]*u_h[id]+v_h[id]*v_h[id]+w_h[id]*w_h[id]);
+
+				fprintf(out,"%d\t  %f\n",j,u_h[id]);
+	}
+   fprintf(out,"zone\n");
+   for(l=0.5;l<=NZ-1.5;l=l+0.25){
+
+        yy = (l - 0.5)/H;
+
+		uanal = H*H*FX*(yy-yy*yy)/(2.0*visc);//+1.1466*Kn+0.62*Kn*Kn
+		fprintf(out,"%f   %f\n", l, uanal);
+	}
+  fclose(out);
+}
+/***************************************************************************/
+/**------------------ check for conservation of mass ---------------------**/
+/***************************************************************************/
+void rec_log(float *denf_h,float *u_h,float *v_h,float *w_h,float *phi_h)
+{
+	int j,i,k,id;
+	FILE *ou;
+
+	float res,c0,torx,tory,torz,k_sh,k_kc,k_bb,k_ah,in_mass,out_mass,mid_mass,u, v, w, vel, ro, vel_ave, u_ave, v_ave, w_ave, peru, perv, perw, phi,n, ro_ave,bdr,nu,Re,phii;
+
+	in_mass = 0.0;
+	out_mass = 0.0;
+	mid_mass = 0.0;
+	u_ave = 0.0;
+	v_ave = 0.0;
+	w_ave = 0.0;
+	vel_ave = 0.0;
+	ro_ave = 0.0;
+	n = 0.0;
+	u = 0.0;
+	v = 0.0;
+	w = 0.0;
+	vel = 0.0;
+	ro = 0.0;
+	nu = (tau - 0.5) / 4.0;
+	/**--------- calculating inlet mass -------**/
+	
+
+	for(k = 0; k<NZ; k++){
+		for(j = 0; j<NY ; j++){
+			for(i=0; i<NX; i++){
+				id=k*(NX*NY)+j*NX+i;
+				u = u_h[id];
+				v = v_h[id];
+				w = w_h[id];
+
+				vel = sqrt(u*u + v*v + w*w);
+				ro = denf_h[id];
+				bdr = phi_h[id];
+				if (bdr == 0) {
+					u_ave += u;
+					v_ave += v;
+					w_ave += w;
+					ro_ave += ro;
+					vel_ave += vel;
+					n += 1.;
+				}else { u = 0.0; v = 0.0; w = 0.0; vel = 0.0; ro = 0.0;} 
+
+				if (i == 5)     in_mass +=vel*ro;
+				if (i == NX/2) mid_mass +=vel*ro;
+				if (i == NX-5) out_mass +=vel*ro;
+			}
+		}
+	}
+	torx=vel_ave/u_ave;
+	tory=vel_ave/v_ave;
+	torz=vel_ave/w_ave;
+
+	u_ave /= (NX*NY*NZ);
+	v_ave /= (NX*NY*NZ);
+	w_ave /= (NX*NY*NZ);
+	vel_ave /= n;
+	ro_ave /= n;
+	Re = vel_ave*R / nu;
+	phii=n/(NX*NY*NZ);
+	res=3.3113;
+	peru = u_ave*nu*res*res / (FX+FY+FZ)/(0.9869233);
+	perv = v_ave*nu*res*res / (FX+FY+FZ)/(0.9869233);
+	perw = w_ave*nu*res*res / (FX+FY+FZ)/(0.9869233);
+
+	/*c0 = 168.0847*pow(phii,4.) - 309.7246*pow(phii,3.) + 203.5196*pow(phii,2.) - 47.6256*phii + 6.7517;
+	k_sh=pow(phii,3.)/36./c0/pow(1.-phii,2);
+	k_kc=pow(phii,3)/180./pow(1.-phii,2);
+	k_bb=(1-1.209*pow(1.-phii,2./3.))/60.*pow(phii,2)/pow(1.-phii,2);
+	k_ah=(1-1.209*pow(1.-phii,2./3.))/30./(1-1.209*pow(1.-phii,2./3.)+2.*phii)*pow(phii,3)/pow(1.-phii,2);*/
+	char s[10];
+	sprintf(s, "%d", it);
+	ou=fopen(s,"w");
+	//ou=fopen("log.dat","w");
+	fprintf(ou,"perm_x=%f   perm_y=%f   perm_z=%f  \n\n",peru ,perv ,perw );
+	fprintf(ou,"u_ave=%f   v_ave=%f   w_ave=%f  \n\n",u_ave ,v_ave ,w_ave );
+	fprintf(ou,"Q_in=%f   Q_mid=%f   Q_out=%f  \n\n",in_mass ,mid_mass ,out_mass );
+	fprintf(ou,"Rey=%f   VEL_ave=%f   Tau=%f\n\n",Re ,vel_ave,tau );
+	fprintf(ou,"Torx=%f   Tory=%f   Torz=%f  \n\n",torx ,tory ,torz );
+	fprintf(ou,"FX=%f   FY=%f   FZ=%f  \n\n",FX ,FY ,FZ );
+	fprintf(ou,"PHI=%f   M=%f   visc=%f  \n\n",100.*phii ,vel_ave ,nu );
+	fprintf(ou,"Resolution=%f   \n\n",res );
+	//fprintf(ou,"k_kc=%f   k_bb=%f   k_ah=%f  k_esh=%f \n\n",k_kc ,k_bb ,k_ah, k_sh );
+	fclose(ou);
+
+}
+/*---------------------------------------------------------------------------------------------*/
+/*-------------------->    specify the boundry type of all nodes   <---------------------------*/
+/*---------------------------------------------------------------------------------------------*/
+void bdr_st(float *phi_h){
+
+
+  int i,j,k,id,p;
+  float x,y,z;
+  // ------ read from the input file until the word "POINTS" is reached -------
+  // FILE *fileID;
+   // fileID = fopen("data.dat","r");
+ 
+	for(i=0; i<NX; ++i){ 
+		for(j=0; j<NY; ++j){
+			for(k = 0; k<NZ; k++){
+			  id=k*(NX*NY)+j*NX+i;
+			 // fscanf(fileID, " %d ", &p);
+			 // if(p==0){
+				phi_h[id] = 0.0;
+			 // }else{
+			//	phi_h[id] = 5.0;
+			 // }
+
+			 if(j==0 || j==NY-1)phi_h[id] = 5.0;
+		  }
+	  }
+  }
+ // fclose(fileID);
+   /*for(k = 0; k<NZ; k++){
+	  for(j=0; j<NY; ++j){
+		  for(i=0; i<NX; ++i){
+			  id=k*(NX*NY)+j*NX+i;
+			  x = (i+0.0);
+			  y = (j+0.0);
+		      z = (k+0.0);
+		  if((sqrt(pow(x-(NX-1.)/2.,2) + pow(y-(NY-1.)/2.,2) + pow(z-(NZ-1.)/2.,2))<=R) ||
+			 (sqrt(pow(x,2) + pow(y,2) + pow(z,2))<=R) ||
+			 (sqrt(pow(x-NX+1,2) + pow(y,2) + pow(z,2))<=R) ||
+			 (sqrt(pow(x,2) + pow(y-NY+1,2) + pow(z,2))<=R) ||
+			 (sqrt(pow(x-NX+1,2) + pow(y-NY+1,2) + pow(z,2))<=R) ||
+			 (sqrt(pow(x,2) + pow(y,2) + pow(z-NZ+1,2))<=R) ||
+			 (sqrt(pow(x-NX+1,2) + pow(y,2) + pow(z-NZ+1,2))<=R) ||
+			 (sqrt(pow(x,2) + pow(y-NY+1,2) + pow(z-NZ+1,2))<=R) ||
+			 (sqrt(pow(x-NX+1,2) + pow(y-NY+1,2) + pow(z-NZ+1,2))<=R)){
+				 phi_h[id] = 5.0;
+		 }else{
+			 phi_h[id] = 0.0;
+		  }
+		 }
+	 }
+  }
+  a=0;
+  for(k = 0; k<NZ; k++){
+	  for(j=0; j<NY; ++j){
+		  for(i=0; i<NX; ++i){ 
+			  id=k*NX*NY+j*NX+i;
+			  if(phi_h[id] > 0.5)a=a+1;
+		  }
+	  }
+  }*/
+
+}
+//************************************************************************************************************************************************
+//************************************************************************************************************************************************
+
+
+int main (int argc,char **argv)
+{
+	int i,j,k,id,idd,d;
+	float cx[19],cy[19],cz[19],a;
+  //*****************define cudaevents variable  to calculate duration of processing****************
+
+    cudaEvent_t start, stop;
+    cudaEventCreate(&start);
+    cudaEventCreate(&stop);
+    cudaEventRecord( start, 0 );
+
+	time_t start2, end;
+	float duration;
+	start2=time(0);
+	
+	FILE *out;
+	out=fopen("field.plt","w");
+	fclose(out);
+
+	 a = sqrt(2.0);
+
+	cx[1] =  1.0/a;  cy[1] =  1.0/a;    cz[1] = 0.0/a;
+	cx[2] =  1.0/a;  cy[2] = -1.0/a;    cz[2] = 0.0/a;
+	cx[3] = -1.0/a;  cy[3] =  1.0/a;    cz[3] = 0.0/a;
+	cx[4] = -1.0/a;  cy[4] = -1.0/a;    cz[4] = 0.0/a;
+
+	cx[5] =  1.0/a;  cy[5] =  0.0/a;    cz[5] =  1.0/a;
+	cx[6] =  1.0/a;  cy[6] =  0.0/a;    cz[6] = -1.0/a;
+	cx[7] = -1.0/a;  cy[7] =  0.0/a;    cz[7] = 1.0/a;
+	cx[8] = -1.0/a;  cy[8] =  0.0/a;    cz[8] = -1.0/a;
+
+	cx[9]  =  0.0/a;  cy[9]  =  1.0/a;      cz[9] = 1.0/a;
+	cx[10] =  0.0/a;  cy[10] = 1.0/a;      cz[10] = -1.0/a;
+	cx[11] =  0.0/a;  cy[11] =  -1.0/a;    cz[11] = 1.0/a;
+	cx[12] =  0.0/a;  cy[12] =  -1.0/a;    cz[12] =-1.0/a;
+
+	cx[13] =  1.0/a;  cy[13] =  0.0/a;    cz[13] = 0.0/a;
+	cx[14] = -1.0/a;  cy[14] =  0.0/a;    cz[14] = 0.0/a;
+	cx[15] =  0.0/a;  cy[15] =  1.0/a;    cz[15] = 0.0/a;
+	cx[16] =  0.0/a;  cy[16] = -1.0/a;    cz[16] = 0.0/a;
+	cx[17] =  0.0/a;  cy[17] =  0.0/a;    cz[17] = 1.0/a;
+	cx[18] =  0.0/a;  cy[18] =  0.0/a;    cz[18] = -1.0/a;
+   //****************define size variable***********************************************************************
+   unsigned int size=NX*NY*NZ;
+   unsigned int mem_size= size* sizeof(float);
+   unsigned int i_size= size* sizeof(int);
+   
+
+	//**************define variable and allocate memory on host for velocity,density and distribution function***
+
+	//float *uf_h = (float *)malloc(mem_size);
+	//float *vf_h = (float *)malloc(mem_size);
+	//float *wf_h = (float *)malloc(mem_size);
+	//float *ug_h = (float *)malloc(mem_size);
+	//float *vg_h = (float *)malloc(mem_size);
+	//float *wg_h = (float *)malloc(mem_size);
+	float *phi_h = (float *)malloc(mem_size);
+
+	float *denf_h = (float *)malloc(mem_size);
+	float *u_h = (float *)malloc(mem_size);
+	float *v_h = (float *)malloc(mem_size);
+	float *w_h = (float *)malloc(mem_size);
+	//******** allocation test **********************************************************************
+	if( denf_h==NULL || u_h==NULL || v_h==NULL  || w_h==NULL){ 
+			fprintf(stderr,"failed to allocate host memory!\n");
+			getch();
+		    exit(EXIT_FAILURE);
+	}
+	bdr_st(phi_h);
+
+	//****define variable and allocation memory on device memory(global) for distribution function*************************
+	printf("Loading Data on GPU . . .\n\n");
+	unsigned int m_size= 18*(size)* sizeof(float);
+	float *fin_d;
+	float *fout_d;
+	float *phi_d;
+	cudaMalloc((void**)&phi_d,mem_size);
+
+	float *fin_h = (float *)malloc(m_size);
+	cudaMalloc((void**)&fin_d,m_size);
+	cudaMalloc((void**)&fout_d,m_size);
+
+	
+	cudaMemcpy(phi_d,phi_h,mem_size,cudaMemcpyHostToDevice);
+	
+	
+	//****setup execution parameters****************************************************************************************
+
+	dim3 dim_block(NX, 1, 1);
+	dim3 dim_grid (NZ, NY,1);
+
+	
+	//*****call initialize global gunction**********************************************************************************
+
+	initialize<<<dim_grid,dim_block>>>(fin_d, phi_d);
+	
+	//******lbm loop*********************************************************************************************************
+	it=1;
+	int ERR=5000;
+	printf("GPU Is Processing. Please Wait . . .\n\n");
+	printf("******************************************************************\n\n");
+	
+	while(it<=5000)
+	{
+		//calcprop<<<dim_grid,dim_block>>>(fin_d);
+		collision<<<dim_grid,dim_block>>>(fin_d,fout_d);
+		streaming<<<dim_grid,dim_block>>>(fin_d,fout_d);
+		if((it%500)==0) printf("%d \n",it);
+		if((it%ERR)==0){
+			//printf("%d \n",it);
+		//	cudaMemcpy(phi_h,phi_d,mem_size,cudaMemcpyDeviceToHost);
+			cudaMemcpy(fin_h,fin_d,m_size,cudaMemcpyDeviceToHost);			
+					
+	
+			//******calculating properties(velocity&density)***************************************************************************
+		    for(k=0;k<NZ;k++){
+				for(j=0;j<NY;j++){
+					for(i=0;i<NX;i++){
+						id=k*NX*NY+j*NX+i;
+						denf_h[id]=0.0;
+						u_h[id]=0.0;
+						v_h[id]=0.0;
+						w_h[id]=0.0;
+						for(d=1; d<=18; ++d){
+							idd = (d-1)*NX*NY*NZ + id;
+							denf_h[id]+=fin_h[idd];
+							u_h[id]+=cx[d]*fin_h[idd];
+							v_h[id]+=cy[d]*fin_h[idd];
+							w_h[id]+=cz[d]*fin_h[idd];
+						 }
+						if(denf_h[id]==0.0){
+							u_h[id]=0.0;
+							v_h[id]=0.0;
+							w_h[id]=0.0;
+						}else{
+							u_h[id]/=denf_h[id];
+							v_h[id]/=denf_h[id];
+							w_h[id]/=denf_h[id];
+							/*u_h[id]=(u_h[id]+0.5*FX)/denf_h[id];
+							v_h[id]=(v_h[id]+0.5*FY)/denf_h[id];
+							w_h[id]=(w_h[id]+0.5*FZ)/denf_h[id];*/
+						}
+					}
+				}
+			}
+			printf("Praparing the LOG_file . . .\n\n");
+			rec_log(denf_h,u_h,v_h,w_h,phi_h);
+			results(denf_h,u_h,v_h,w_h,phi_h);
+				}
+		it=it+1;
+
+	}
+	printf("End of Process on GPU.\n\n");
+	
+	printf("filed the Plot . . .\n\n");
+	//results(denf_h,u_h,v_h,w_h,phi_h);
+	
+
+	//*********calculating duration******************************************************************************************
+	cudaEventRecord( stop, 0 );
+    cudaEventSynchronize( stop );
+	float d_time;
+	cudaEventElapsedTime(&d_time,start,stop);
+	printf("duration of gpu calculation is: %f seconds\n",d_time/1000);
+
+	end=time(0);
+	duration=difftime(end,start2);
+	printf("The computational time is %f seconds\n",duration);
+
+	printf("MLUPS=%2.1f\n\n", MLUPS((it + 1), duration));
+
+	//*********free memory***************************************************************************************************
+	cudaEventDestroy(start);
+    cudaEventDestroy(stop );
+	cudaFree(fin_d);
+	cudaFree(phi_d);
+
+	//free(uf_h);free(ug_h);
+	//free(vf_h);free(vg_h);
+	//free(wf_h);free(wg_h);
+	free(denf_h);
+	free(phi_h);
+	free(fin_h); free(u_h); free(v_h); free(w_h);
+	//**************************************************************************************************************************************
+
+	getch();
+	return(0);
+	}
+	
